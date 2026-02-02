@@ -1,34 +1,36 @@
-Add-Type @"
+# ---------- Win32 bindings (safe to re-run) ----------
+if (-not ("Win32" -as [type])) {
+    Add-Type -ErrorAction Stop @"
 using System;
 using System.Runtime.InteropServices;
-public class Win32 {
+
+public static class Win32 {
     [DllImport("user32.dll")]
     public static extern short GetAsyncKeyState(int vKey);
 
     [DllImport("user32.dll")]
-    public static extern void mouse_event(int dwFlags, int dx, int dy, int dwData, int dwExtraInfo);
+    public static extern void mouse_event(int flags, int dx, int dy, int data, int extra);
 
     [DllImport("winmm.dll")]
-    public static extern uint timeBeginPeriod(uint uMilliseconds);
+    public static extern uint timeBeginPeriod(uint ms);
 
-    [DllImport("kernel32.dll")]
-    public static extern void Sleep(uint dwMilliseconds);
-
-    public const int LEFTDOWN = 0x02;
-    public const int LEFTUP   = 0x04;
-    public const int RIGHTDOWN= 0x08;
-    public const int RIGHTUP  = 0x10;
+    public const int LEFTDOWN  = 0x02;
+    public const int LEFTUP    = 0x04;
+    public const int RIGHTDOWN = 0x08;
+    public const int RIGHTUP   = 0x10;
 }
 "@
+}
 
-# 1. Force High Precision
+# ---------- Timer resolution ----------
 [Win32]::timeBeginPeriod(1)
 
-# 2. Prevent Windows Efficiency Mode Throttling
-$process = [System.Diagnostics.Process]::GetCurrentProcess()
-$process.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::RealTime
+# ---------- Process priority (safe) ----------
+try {
+    [System.Diagnostics.Process]::GetCurrentProcess().PriorityClass = "High"
+} catch {}
 
-# 3. Data Pattern
+# ---------- Timing config ----------
 $config = @(
 @(14,14), @(13,42), @(13,14), @(15,43), @(12,14), @(18,49), @(15,13), @(17,44),
 @(14,13), @(15,46), @(14,18), @(13,41), @(16,14), @(20,48), @(13,12), @(15,43),
@@ -49,40 +51,41 @@ $config = @(
 @(13,44), @(13,14), @(20,41), @(12,13), @(14,44)
 )
 
-$idx = 0
-$rand = New-Object System.Random
+# ---------- State ----------
+$idx  = 0
+$rand = [Random]::new()
 
-Write-Host "STABILIZED CLICKER ACTIVE" -ForegroundColor Green
-Write-Host "Do NOT minimize with the [-] button. Keep it behind your game window." -ForegroundColor Red
+Write-Host "CLICKER ACTIVE (F12 to exit)"
 
+# ---------- Loop ----------
 while ($true) {
+
+    # Exit on F12
     if ([Win32]::GetAsyncKeyState(0x7B) -lt 0) { break }
 
-    $doLeft  = ([Win32]::GetAsyncKeyState(0x06) -lt 0)
-    $doRight = ([Win32]::GetAsyncKeyState(0x05) -lt 0)
+    # XBUTTON1 / XBUTTON2 (side buttons)
+    $holdLeft  = ([Win32]::GetAsyncKeyState(0x05) -lt 0)
+    $holdRight = ([Win32]::GetAsyncKeyState(0x06) -lt 0)
 
-    if ($doLeft -or $doRight) {
+    if ($holdLeft -or $holdRight) {
+
         $pair = $config[$idx % $config.Count]
         $idx++
 
-        # Jitter calculation
         $downDelay = [Math]::Max(1, $pair[0] - $rand.Next(1,3))
         $upDelay   = [Math]::Max(1, $pair[1] - $rand.Next(1,3))
 
-        # Action
-        if ($doLeft) { [Win32]::mouse_event([Win32]::LEFTDOWN, 0, 0, 0, 0) }
-        if ($doRight) { [Win32]::mouse_event([Win32]::RIGHTDOWN, 0, 0, 0, 0) }
-        
-        # High precision sleep
-        [Win32]::Sleep($downDelay)
+        if ($holdLeft)  { [Win32]::mouse_event([Win32]::LEFTDOWN,  0,0,0,0) }
+        if ($holdRight) { [Win32]::mouse_event([Win32]::RIGHTDOWN, 0,0,0,0) }
 
-        if ($doLeft) { [Win32]::mouse_event([Win32]::LEFTUP, 0, 0, 0, 0) }
-        if ($doRight) { [Win32]::mouse_event([Win32]::RIGHTUP, 0, 0, 0, 0) }
+        Start-Sleep -Milliseconds $downDelay
 
-        [Win32]::Sleep($upDelay)
+        if ($holdLeft)  { [Win32]::mouse_event([Win32]::LEFTUP,  0,0,0,0) }
+        if ($holdRight) { [Win32]::mouse_event([Win32]::RIGHTUP, 0,0,0,0) }
+
+        Start-Sleep -Milliseconds $upDelay
     }
     else {
-        # Keep the thread hot but not 100% CPU
-        [Win32]::Sleep(1)
+        Start-Sleep -Milliseconds 5
     }
 }
