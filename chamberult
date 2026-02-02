@@ -1,18 +1,21 @@
-# ---------- Win32 bindings (safe to re-run) ----------
+# ---------- Win32 bindings (guarded so it starts every time) ----------
 if (-not ("Win32" -as [type])) {
-    Add-Type -ErrorAction Stop @"
+Add-Type @"
 using System;
 using System.Runtime.InteropServices;
 
-public static class Win32 {
+public class Win32 {
     [DllImport("user32.dll")]
     public static extern short GetAsyncKeyState(int vKey);
 
     [DllImport("user32.dll")]
-    public static extern void mouse_event(int flags, int dx, int dy, int data, int extra);
+    public static extern void mouse_event(int dwFlags, int dx, int dy, int dwData, int dwExtraInfo);
 
     [DllImport("winmm.dll")]
-    public static extern uint timeBeginPeriod(uint ms);
+    public static extern uint timeBeginPeriod(uint uMilliseconds);
+
+    [DllImport("kernel32.dll")]
+    public static extern void Sleep(uint dwMilliseconds);
 
     public const int LEFTDOWN  = 0x02;
     public const int LEFTUP    = 0x04;
@@ -22,15 +25,10 @@ public static class Win32 {
 "@
 }
 
-# ---------- Timer resolution ----------
+# ---------- Force timer resolution ----------
 [Win32]::timeBeginPeriod(1)
 
-# ---------- Process priority (safe) ----------
-try {
-    [System.Diagnostics.Process]::GetCurrentProcess().PriorityClass = "High"
-} catch {}
-
-# ---------- Timing config ----------
+# ---------- Timing config (UNCHANGED) ----------
 $config = @(
 @(14,14), @(13,42), @(13,14), @(15,43), @(12,14), @(18,49), @(15,13), @(17,44),
 @(14,13), @(15,46), @(14,18), @(13,41), @(16,14), @(20,48), @(13,12), @(15,43),
@@ -53,39 +51,41 @@ $config = @(
 
 # ---------- State ----------
 $idx  = 0
-$rand = [Random]::new()
+$rand = New-Object System.Random
 
-Write-Host "CLICKER ACTIVE (F12 to exit)"
+Write-Host "STABILIZED CLICKER ACTIVE"
+Write-Host "F12 to exit"
 
-# ---------- Loop ----------
+# ---------- Main loop ----------
 while ($true) {
 
-    # Exit on F12
-    if ([Win32]::GetAsyncKeyState(0x7B) -lt 0) { break }
+    if ([Win32]::GetAsyncKeyState(0x7B) -lt 0) { break } # F12
 
-    # XBUTTON1 / XBUTTON2 (side buttons)
-    $holdLeft  = ([Win32]::GetAsyncKeyState(0x06) -lt 0)
-    $holdRight = ([Win32]::GetAsyncKeyState(0x05) -lt 0)
+    # ORIGINAL button mapping (unchanged)
+    $doLeft  = ([Win32]::GetAsyncKeyState(0x06) -lt 0)
+    $doRight = ([Win32]::GetAsyncKeyState(0x05) -lt 0)
 
-    if ($holdLeft -or $holdRight) {
+    if ($doLeft -or $doRight) {
 
         $pair = $config[$idx % $config.Count]
         $idx++
 
-        $downDelay = [Math]::Max(1, $pair[0] - $rand.Next(1,3))
-        $upDelay   = [Math]::Max(1, $pair[1] - $rand.Next(1,3))
+        # ±1–3 ms jitter on BOTH delays
+        $downDelay = [Math]::Max(1, $pair[0] + $rand.Next(-3,4))
+        $upDelay   = [Math]::Max(1, $pair[1] + $rand.Next(-3,4))
 
-        if ($holdLeft)  { [Win32]::mouse_event([Win32]::LEFTDOWN,  0,0,0,0) }
-        if ($holdRight) { [Win32]::mouse_event([Win32]::RIGHTDOWN, 0,0,0,0) }
+        if ($doLeft)  { [Win32]::mouse_event([Win32]::LEFTDOWN,  0,0,0,0) }
+        if ($doRight) { [Win32]::mouse_event([Win32]::RIGHTDOWN, 0,0,0,0) }
 
-        Start-Sleep -Milliseconds $downDelay
+        [Win32]::Sleep($downDelay)
 
-        if ($holdLeft)  { [Win32]::mouse_event([Win32]::LEFTUP,  0,0,0,0) }
-        if ($holdRight) { [Win32]::mouse_event([Win32]::RIGHTUP, 0,0,0,0) }
+        if ($doLeft)  { [Win32]::mouse_event([Win32]::LEFTUP,  0,0,0,0) }
+        if ($doRight) { [Win32]::mouse_event([Win32]::RIGHTUP, 0,0,0,0) }
 
-        Start-Sleep -Milliseconds $upDelay
+        [Win32]::Sleep($upDelay)
     }
     else {
-        Start-Sleep -Milliseconds 5
+        [Win32]::Sleep(1)
     }
 }
+
